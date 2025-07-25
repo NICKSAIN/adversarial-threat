@@ -1,0 +1,55 @@
+import tensorflow as tf
+import numpy as np
+import matplotlib.pyplot as plt
+
+# Load a pre-trained MobileNetV2 model + image preprocessing
+model = tf.keras.applications.MobileNetV2(weights='imagenet')
+preprocess = tf.keras.applications.mobilenet_v2.preprocess_input
+decode = tf.keras.applications.mobilenet_v2.decode_predictions
+
+# Load a sample image from disk
+image_path = "C:\\Users\\NICK\\Downloads\\cat_art_window_140051_3840x2400.jpg"
+image_raw = tf.keras.preprocessing.image.load_img(image_path, target_size=(224, 224))
+image = tf.keras.preprocessing.image.img_to_array(image_raw)
+image_exp = np.expand_dims(image, axis=0)
+image_input = preprocess(image_exp.copy())  # preprocess_input expects batch shape
+
+# Predict original
+original_pred = model.predict(image_input)
+print("Original Prediction:", decode(original_pred, top=1)[0])
+
+# FGSM Attack
+loss_object = tf.keras.losses.CategoricalCrossentropy()
+image_tensor = tf.convert_to_tensor(image_input)
+
+with tf.GradientTape() as tape:
+    tape.watch(image_tensor)
+    prediction = model(image_tensor)
+    label = tf.one_hot(np.argmax(prediction[0]), prediction.shape[-1], dtype=tf.float32)
+    label = tf.expand_dims(label, axis=0)  # Add batch dimension to match prediction
+    loss = loss_object(label, prediction)
+
+# Get gradient and create adversarial image
+gradient = tape.gradient(loss, image_tensor)
+signed_grad = tf.sign(gradient)
+epsilon = 0.05  # Attack strength
+adv_image = image_tensor + epsilon * signed_grad
+adv_image = tf.clip_by_value(adv_image, -1.0, 1.0)
+
+# Predict with adversarial image
+adv_pred = model.predict(adv_image)
+print("Adversarial Prediction:", decode(adv_pred, top=1)[0])
+
+# Show side-by-side
+def show_images(original, adversarial):
+    f, axarr = plt.subplots(1, 2, figsize=(10,5))
+    axarr[0].imshow((original[0] + 1) / 2)  # from [-1, 1] to [0, 1]
+    axarr[0].set_title("Original")
+    axarr[0].axis('off')
+    axarr[1].imshow((adversarial[0] + 1) / 2)
+    axarr[1].set_title("Adversarial")
+    axarr[1].axis('off')
+    plt.tight_layout()
+    plt.show()
+
+show_images(image_input, adv_image.numpy())
